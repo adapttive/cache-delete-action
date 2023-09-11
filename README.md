@@ -20,7 +20,7 @@ cleanup:
     name: 'cache cleanup'
 
     steps:
-    - uses: adapttive/cache-delete-action
+    - uses: adapttive/cache-delete
       with:
         github-token: ${{ secrets.ADMIN_GITHUB_TOKEN }}
         cache-key: ${{ github.sha }}-your-cache-key 
