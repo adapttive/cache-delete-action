@@ -1,4 +1,4 @@
-name: 'Purge Cache'
+name: 'adapttive/cache-delete'
 description: 'Purge Github Actions caches for a repository.'
 branding:
   icon: 'archive'
