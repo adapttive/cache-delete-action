@@ -1,0 +1,114 @@
+name: 'Purge Cache'
+description: 'Purge Github Actions caches for a repository.'
+branding:
+  icon: 'archive'
+  color: 'orange'
+inputs:
+  github-token:
+    description: 'Your GITHUB_TOKEN.'
+    required: false
+    default: ${{ github.token }}
+  github-token-type:
+    description: 'Your Github Token type: Bearer|token.'
+    required: false
+    default: 'token'
+  dry-run:
+    description: 'List caches only, do not clear them.'
+    required: false
+    default: 'false'
+  cache-key:
+    description: 'Specific cache key to be deleted.'
+    required: false
+    default: ''
+  page-size:
+    description: 'Page size for cache listing.'
+    required: false
+    default: '100'
+runs:
+  using: "composite"
+  steps:
+    - name: List Caches
+      id: list-caches
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PAGE_SIZE: ${{ inputs.page-size }}
+        CACHE_KEY: ${{ inputs.cache-key }}
+        GITHUB_TOKEN_TYPE: ${{ inputs.github-token-type }}
+      run: |
+        function list_caches {
+          local pageindex="$1"
+          curl -L \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: ${GITHUB_TOKEN_TYPE} ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/caches?per_page=${PAGE_SIZE}&page=${pageindex}"
+        }
+
+        if [ "$CACHE_KEY" == "" ]
+        then
+          pageindex=1
+  
+          echo "fetching page ${pageindex}..."
+          first="$(list_caches "${pageindex}")"
+          total_count="$(jq -r '.total_count' <<< "${first}")"
+          all_ids="$(jq '.actions_caches[].id' <<< "${first}" | tr '\n' ' ')"
+  
+          remaining="$((total_count-PAGE_SIZE))"
+          echo "  cache ids in page ${pageindex}: ${all_ids}, ${remaining} remaining."
+          while [[ $remaining > 0 ]]; do
+            pageindex="$((pageindex+1))"
+            echo "fetching page ${pageindex}..."
+            ids="$(list_caches "${pageindex}" | jq '.actions_caches[].id' | tr '\n' ' ')"
+  
+            all_ids="${all_ids} ${ids}"
+            remaining="$((remaining-PAGE_SIZE))"
+            if [[ $remaining < 0 ]]; then remaining=0; fi
+            echo "  cache ids in page ${pageindex}: ${ids}, ${remaining} remaining."
+          done
+  
+          echo "cache ids total: ${all_ids}"
+          echo "cache_ids=$all_ids" >> "$GITHUB_OUTPUT"
+
+        else
+          echo "cache id $CACHE_KEY set for deletion"
+        fi 
+
+    - name: Purge Caches
+      id: purge-caches
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        CACHE_KEY: ${{ inputs.cache-key }}
+        GITHUB_TOKEN_TYPE: ${{ inputs.github-token-type }}
+      run: |
+        if [ "$CACHE_KEY" == "" ]
+        then
+          for id in ${{ steps.list-caches.outputs.cache_ids }}; do
+            if [[ "${{ inputs.dry-run }}" == 'true' ]]; then
+              echo "would delete cache $id using following command:"
+              echo curl -L \
+                -X DELETE \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: ${GITHUB_TOKEN_TYPE} ${GH_TOKEN}" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/caches/$id"
+            else
+              echo "deleting cache $id"
+              curl -L \
+                -X DELETE \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: ${GITHUB_TOKEN_TYPE} ${GH_TOKEN}" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/caches/$id"
+            fi
+          done
+        else
+           echo "deleting cache $CACHE_KEY"
+              curl -L \
+                -X DELETE \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: ${GITHUB_TOKEN_TYPE} ${GH_TOKEN}" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/caches?key=${CACHE_KEY}"
+        fi
